@@ -1,27 +1,27 @@
 import { Audio } from "expo-av";
 import React, { useEffect, useState } from "react";
-import { Dimensions, Image, StyleSheet, Text, View } from "react-native";
+import { Dimensions, StyleSheet, Text, View } from "react-native";
 import * as Animatable from "react-native-animatable";
 
 const { height, width } = Dimensions.get("window");
 
 const prizeLevels = [
-  "₪100",
-  "₪200",
-  "₪300",
-  "₪500",
-  "₪1,000",
-  "₪2,000",
-  "₪4,000",
-  "₪8,000",
-  "₪16,000",
-  "₪32,000",
-  "₪64,000",
-  "₪125,000",
-  "₪250,000",
-  "₪500,000",
   "₪1,000,000",
-].reverse(); // million on top
+  "₪500,000",
+  "₪250,000",
+  "₪100,000",
+  "₪50,000",
+  "₪25,000",
+  "₪15,000",
+  "₪12,500",
+  "₪10,000",
+  "₪7,500",
+  "₪5,000",
+  "₪3,000",
+  "₪2,000",
+  "₪1,000",
+  "₪500",
+].reverse(); // Start from top with ₪1,000,000
 
 export default function PrizePyramid({ step }) {
   const [currentStep, setCurrentStep] = useState(0);
@@ -54,12 +54,6 @@ export default function PrizePyramid({ step }) {
 
   return (
     <View style={styles.wrapper}>
-      <Image
-        source={require("../assets/images/sparkles.webp")}
-        style={styles.background}
-        resizeMode="cover"
-      />
-
       <View style={styles.container}>
         {prizeLevels.map((amount, i) => {
           const index = prizeLevels.length - 1 - i;
@@ -82,6 +76,7 @@ export default function PrizePyramid({ step }) {
                 styles.row,
                 isCurrent && styles.active,
                 isPast && styles.faded,
+                { width: getRowWidth(i) }, // Dynamic width based on row position
               ]}
             >
               <Text
@@ -101,6 +96,28 @@ export default function PrizePyramid({ step }) {
   );
 }
 
+// Function to control the width for the pyramid effect
+const getRowWidth = (i) => {
+  const widths = [
+    "85%", // Top level
+    "75%",
+    "70%",
+    "65%",
+    "60%",
+    "55%",
+    "50%",
+    "45%",
+    "40%",
+    "35%",
+    "30%",
+    "25%",
+    "20%",
+    "15%",
+    "10%", // Bottom level
+  ];
+  return widths[i] || "100%"; // Default to full width
+};
+
 const styles = StyleSheet.create({
   wrapper: {
     width: width,
@@ -108,35 +125,36 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     position: "absolute",
-    backgroundColor: "#000",
-  },
-  background: {
-    position: "absolute",
-    width: width,
-    height: height,
-    opacity: 0.2,
+    backgroundColor: "#000", // Solid black background
   },
   container: {
-    backgroundColor: "rgba(0,0,0,0.8)",
+    backgroundColor: "rgba(0,0,0,0.8)", // Slight transparency
     borderRadius: 12,
     padding: 20,
     alignItems: "center",
     zIndex: 2,
+    justifyContent: "center",
   },
   row: {
-    paddingVertical: 6,
-    paddingHorizontal: 20,
+    paddingVertical: 8,
+    marginVertical: 5,
+    alignItems: "center", // Center the text
+    justifyContent: "center",
+    borderRadius: 6,
+    height: 50, // Set a height to make each row consistent
   },
   text: {
-    color: "#999",
-    fontSize: 18,
+    color: "#fff",
+    fontSize: 22, // Consistent font size
+    textAlign: "center",
   },
   active: {
-    backgroundColor: "#ffd700",
+    backgroundColor: "#ffd700", // Golden color for active step
     borderRadius: 6,
+    paddingVertical: 15,
   },
   activeText: {
-    color: "#000",
+    color: "#000", // Black text for active step
     fontWeight: "bold",
   },
   faded: {

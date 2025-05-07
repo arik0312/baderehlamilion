@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Audio } from "expo-av";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
@@ -19,18 +20,22 @@ export default function StartScreen({ navigation }) {
   const [name, setName] = useState("");
   const [nameLocked, setNameLocked] = useState(false);
   const [lastScore, setLastScore] = useState(null);
+  const [bgSound, setBgSound] = useState(null);
+  const [isMuted, setIsMuted] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
       try {
         const storedName = await AsyncStorage.getItem("lastName");
         const storedScore = await AsyncStorage.getItem("lastScore");
+        const storedMuted = await AsyncStorage.getItem("isMuted");
 
         if (storedName) {
           setName(storedName);
           setNameLocked(true);
         }
         if (storedScore) setLastScore(storedScore);
+        if (storedMuted !== null) setIsMuted(storedMuted === "true");
       } catch (err) {
         console.log("Failed to load from storage:", err);
       }
@@ -38,12 +43,53 @@ export default function StartScreen({ navigation }) {
     loadData();
   }, []);
 
+  // Load and play intro music
+  useEffect(() => {
+    let mounted = true;
+    async function playIntro() {
+      try {
+        const { sound } = await Audio.Sound.createAsync(
+          require("../assets/sounds/intro.mp3"),
+          { shouldPlay: true, isLooping: true, volume: isMuted ? 0 : 1 }
+        );
+        if (mounted) {
+          setBgSound(sound);
+        } else {
+          await sound.unloadAsync();
+        }
+      } catch (e) {
+        console.error("❌ error playing intro", e);
+      }
+    }
+    playIntro();
+
+    return () => {
+      mounted = false;
+      bgSound && bgSound.unloadAsync();
+    };
+  }, [isMuted]);
+
+  const toggleMute = async () => {
+    const next = !isMuted;
+    setIsMuted(next);
+    await AsyncStorage.setItem("isMuted", next.toString());
+    if (bgSound) {
+      await bgSound.setStatusAsync({ isMuted: next });
+    }
+  };
+
   const handleStart = async () => {
     if (!name.trim() || name.length < 2) return;
 
     try {
       await AsyncStorage.setItem("lastName", name);
-      navigation.navigate("Quiz", { name });
+
+      if (bgSound) {
+        await bgSound.stopAsync();
+        await bgSound.unloadAsync();
+      }
+
+      navigation.navigate("Quiz", { name, isMuted });
     } catch (err) {
       console.log("Failed to save name:", err);
     }
@@ -74,6 +120,11 @@ export default function StartScreen({ navigation }) {
           behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
           <View style={styles.container}>
+            {/* Mute/Unmute Button */}
+            <TouchableOpacity style={styles.muteButton} onPress={toggleMute}>
+              <Text style={styles.muteIcon}>{isMuted ? "🔇" : "🔊"}</Text>
+            </TouchableOpacity>
+
             <Animatable.Image
               animation="bounceIn"
               duration={1500}
@@ -190,5 +241,18 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  muteButton: {
+    position: "absolute",
+    top: 40,
+    right: 20,
+    zIndex: 10,
+    padding: 8,
+    backgroundColor: "#333",
+    borderRadius: 20,
+  },
+  muteIcon: {
+    fontSize: 18,
+    color: "#fff",
   },
 });

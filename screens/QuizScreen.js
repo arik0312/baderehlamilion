@@ -1,16 +1,20 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Audio } from "expo-av";
 import LottieView from "lottie-react-native";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, View } from "react";
 import {
+  Dimensions,
   Image,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
 } from "react-native";
+import * as Animatable from "react-native-animatable"; 
+
 import questionsData from "../assets/triviaquestions.json";
 import PrizePyramid from "../components/PrizePyramid";
+const { width, height } = Dimensions.get("window");
 
 const compliments = [
   "תשובה נכונה!",
@@ -36,17 +40,19 @@ const shuffleArray = (array) => {
 
 export default function QuizScreen({ navigation, route }) {
   const { name } = route.params || {};
-  const [questions, setQuestions] = useState([]);
-  const [questionIndex, setQuestionIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState(null);
   const [feedback, setFeedback] = useState("");
   const [disabled, setDisabled] = useState(false);
   const [score, setScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
   const [showPyramid, setShowPyramid] = useState(false);
+  const [showUI, setShowUI] = useState(true);
+
   const [timer, setTimer] = useState(15);
   const timerRef = useRef(null);
-
+  const [soundCorrect, setSoundCorrect] = useState(null);
+  const [soundWrong, setSoundWrong] = useState(null);
+  const [currentQuestion, setCurrentQuestion] = useState(null);
   // Lifelines states
   const [usedFifty, setUsedFifty] = useState(false);
   const [fiftyOptions, setFiftyOptions] = useState(null);
@@ -54,13 +60,44 @@ export default function QuizScreen({ navigation, route }) {
   const [audienceResult, setAudienceResult] = useState(null);
   const [usedPhone, setUsedPhone] = useState(false);
   const [phoneResult, setPhoneResult] = useState(null);
+  const [pool, setPool] = useState([]);
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadSounds() {
+      try {
+        const { sound: sc } = await Audio.Sound.createAsync(
+          require("../assets/sounds/correct.mp3")
+        );
+        const { sound: sw } = await Audio.Sound.createAsync(
+          require("../assets/sounds/wrong.mp3")
+        );
+
+        if (mounted) {
+          setSoundCorrect(sc);
+          setSoundWrong(sw);
+        } else {
+          sc.unloadAsync();
+          sw.unloadAsync();
+        }
+      } catch (e) {
+        console.error("❌ error loading sounds", e);
+      }
+    }
+    loadSounds();
+
+    return () => {
+      mounted = false;
+      soundCorrect && soundCorrect.unloadAsync();
+      soundWrong && soundWrong.unloadAsync();
+    };
+  }, []);
+
   const handleTimeOut = () => {
-    if (questions.length === 0 || !questions[questionIndex]) return;
+    if (!currentQuestion) return;
 
     setDisabled(true);
-    setFeedback(
-      `⌛ הזמן נגמר! התשובה הנכונה היא: ${questions[questionIndex].answer}`
-    );
+    setFeedback(`⌛ הזמן נגמר! התשובה הנכונה היא: ${currentQuestion.answer}`);
     setTimeout(() => {
       setGameOver(true);
       saveScore();
@@ -68,11 +105,18 @@ export default function QuizScreen({ navigation, route }) {
   };
 
   useEffect(() => {
-    setQuestions(shuffleArray(questionsData));
+    const randomizedPool = shuffleArray(questionsData).map((q) => ({
+      ...q,
+      options: shuffleArray(q.options),
+    }));
+    setPool(randomizedPool);
+    setCurrentQuestion(
+      randomizedPool[Math.floor(Math.random() * randomizedPool.length)]
+    );
   }, []);
 
   useEffect(() => {
-    if (questions.length === 0) return; // <--- important addition
+    if (!currentQuestion) return;
 
     setTimer(15);
     clearInterval(timerRef.current);
@@ -89,10 +133,10 @@ export default function QuizScreen({ navigation, route }) {
       }, 1000);
     }
     return () => clearInterval(timerRef.current);
-  }, [questionIndex, gameOver, questions]);
+  }, [currentQuestion, gameOver]);
 
-  if (questions.length === 0) return null;
-  const question = questions[questionIndex];
+  if (!currentQuestion) return null;
+  const question = currentQuestion;
 
   const saveScore = async () => {
     try {
@@ -146,44 +190,70 @@ export default function QuizScreen({ navigation, route }) {
     setUsedPhone(true);
   };
 
-  const handleAnswer = (option) => {
+  const handleAnswer = async (option) => {
     if (disabled || gameOver) return;
     clearInterval(timerRef.current);
     setSelectedOption(option);
     setDisabled(true);
 
-    const isCorrect = option === question.answer;
+    const isCorrect = option === currentQuestion.answer;
+
+    // Play sound for correct/wrong answer
+    if (isCorrect && soundCorrect) {
+      await soundCorrect.replayAsync();
+    } else if (!isCorrect && soundWrong) {
+      await soundWrong.replayAsync();
+    }
+
+    // Show feedback
     const msg = isCorrect
       ? compliments[Math.floor(Math.random() * compliments.length)]
-      : `❌ לא נכון! התשובה הנכונה היא: ${question.answer}`;
+      : `❌ לא נכון! התשובה הנכונה היא: ${currentQuestion.answer}`;
     setFeedback(msg);
 
     if (!isCorrect) {
+      // wrong → game over after delay
       setTimeout(() => {
         setGameOver(true);
         saveScore();
       }, 3000);
-    } else {
-      const newScore = score + 1000;
-      setScore(newScore);
-      setShowPyramid(true);
-      const reachedMillion = questionIndex === 14;
-      setTimeout(() => {
-        setShowPyramid(false);
-        if (reachedMillion) {
+      return;
+    }
+
+    // correct → update score and show pyramid
+    setScore((prev) => prev + 1000);
+
+    // Hide the UI and show the pyramid
+    setShowUI(false);
+    setShowPyramid(true); // This triggers the pyramid to appear
+
+    // After 3 seconds, hide pyramid and show other UI components
+    setTimeout(() => {
+      setShowPyramid(false);
+      setShowUI(true); // Show other components again
+
+      // Continue to next question
+      setPool((prevPool) => {
+        const nextPool = prevPool.filter((q) => q !== currentQuestion);
+
+        if (nextPool.length === 0) {
           setGameOver(true);
           saveScore();
-        } else {
-          setQuestionIndex((prev) => prev + 1);
-          setSelectedOption(null);
-          setFeedback("");
-          setDisabled(false);
-          setFiftyOptions(null);
-          setAudienceResult(null);
-          setPhoneResult(null);
+          return [];
         }
-      }, 4000);
-    }
+
+        const nextQ = nextPool[Math.floor(Math.random() * nextPool.length)];
+        setCurrentQuestion(nextQ);
+        return nextPool;
+      });
+
+      setSelectedOption(null);
+      setFeedback("");
+      setDisabled(false);
+      setFiftyOptions(null);
+      setAudienceResult(null);
+      setPhoneResult(null);
+    }, 3000);
   };
 
   const showOptions = fiftyOptions || question.options;
@@ -246,26 +316,32 @@ export default function QuizScreen({ navigation, route }) {
               <Text style={styles.lifelineText}>📞 טלפוני</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.timer}>⌛ {String(timer)} שניות</Text>
-          {question && <Text style={styles.question}>{question.question}</Text>}
+          {showUI && (
+            <>
+              <Text style={styles.timer}>⌛ {String(timer)} שניות</Text>
+              {question && (
+                <Text style={styles.question}>{question.question}</Text>
+              )}
 
-          {showOptions &&
-            showOptions.map((option, idx) => (
-              <TouchableOpacity
-                key={idx}
-                style={[
-                  styles.option,
-                  selectedOption === option &&
-                    (option === question.answer
-                      ? styles.correct
-                      : styles.wrong),
-                ]}
-                onPress={() => handleAnswer(option)}
-                disabled={disabled}
-              >
-                <Text style={styles.optionText}>{option}</Text>
-              </TouchableOpacity>
-            ))}
+              {showOptions &&
+                showOptions.map((option, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    style={[
+                      styles.option,
+                      selectedOption === option &&
+                        (option === question.answer
+                          ? styles.correct
+                          : styles.wrong),
+                    ]}
+                    onPress={() => handleAnswer(option)}
+                    disabled={disabled}
+                  >
+                    <Text style={styles.optionText}>{option}</Text>
+                  </TouchableOpacity>
+                ))}
+            </>
+          )}
 
           {audienceResult && (
             <View style={styles.resultBlock}>
@@ -288,13 +364,20 @@ export default function QuizScreen({ navigation, route }) {
 
       {showPyramid && (
         <View style={styles.pyramidWrapper}>
-          <PrizePyramid step={questionIndex} showStars={true} />
+          <Animatable.View
+            animation="zoomIn"
+            iterationCount={1}
+            duration={2000} // Climbing duration, you can adjust
+            style={styles.pyramidContainer}
+          >
+            <PrizePyramid step={score} />
+          </Animatable.View>
         </View>
       )}
 
       {feedback ? <Text style={styles.feedback}>{feedback}</Text> : null}
 
-      {gameOver && questionIndex === 14 && (
+      {gameOver && pool.length === 0 && (
         <View style={styles.winContainer}>
           <LottieView
             source={require("../assets/animations/winner.json")}
@@ -316,7 +399,7 @@ export default function QuizScreen({ navigation, route }) {
         </View>
       )}
 
-      {gameOver && questionIndex !== 14 && (
+      {gameOver && pool.length > 0 && (
         <TouchableOpacity
           style={styles.gameOverBtn}
           onPress={() => navigation.replace("Start")}
@@ -405,11 +488,18 @@ const styles = StyleSheet.create({
   resultText: { color: "#ccc", fontSize: 14 },
   pyramidWrapper: {
     position: "absolute",
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: "#0a0a23",
+    top: "30%", // Adjust based on where you want it to appear
+    left: "50%",
+    transform: [{ translateX: -width * 0.4 }],
+    justifyContent: "center",
+    alignItems: "center",
+    width: "80%",
+    height: "50%",
+    zIndex: 10, // Ensure pyramid is on top
+  },
+  pyramidContainer: {
+    width: "100%",
+    height: "100%",
     justifyContent: "center",
     alignItems: "center",
   },
